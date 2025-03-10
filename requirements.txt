@@ -1,0 +1,5 @@
+spheral
+pandas
+numpy
+scipy
+matplotlib
