@@ -1,0 +1,23 @@
+# Ignore Python cache and virtual environments
+__pycache__/
+*.pyc
+*.pyo
+.env
+.venv
+*.log
+
+# Ignore macOS system files
+.DS_Store
+
+# Ignore Conda environment files (if not needed)
+conda-meta/
+*.conda
+*.bak
+
+# Ignore Poetry lockfile if using environments outside Poetry
+poetry.lock
+
+# Ignore PyCharm project files
+.idea/
+.mypy_cache/
+*.ipynb_checkpoints/
