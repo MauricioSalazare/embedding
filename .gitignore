@@ -1,5 +1,8 @@
 # Ignore Python cache and virtual environments
 __pycache__/
+data/
+scripts/
+tests/
 *.pyc
 *.pyo
 .env
