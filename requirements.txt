@@ -3,3 +3,10 @@ pandas
 numpy
 scipy
 matplotlib
+plotly
+scikit-learn
+torch
+torchvision
+tensorboard
+umap-learn[plot]
+tqdm

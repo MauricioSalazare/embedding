@@ -3,6 +3,8 @@ __pycache__/
 data/
 scripts/
 tests/
+runs/
+saved_models/
 *.pyc
 *.pyo
 .env
