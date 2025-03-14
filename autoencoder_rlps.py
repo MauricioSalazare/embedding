@@ -1,30 +1,36 @@
 import matplotlib
 from matplotlib import pyplot as plt
+import numpy as np
 
 matplotlib.use("MacOSX")
-
-from src.models import VAE, TorchDataset
-from src.utils import StandardizationPipeline
-from src.metrics import mape
-
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from mpl_toolkits.mplot3d import Axes3D
+from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
-
+from torch.utils.tensorboard import SummaryWriter
+import datetime
+import os
+from src.models import TorchDataset
+from src.utils import scale, StandardizationPipeline
+from src.metrics import mape
 import pandas as pd
 
 
-def vae_loss(reconstructed_x, x, mu, logvar):
-    """Loss function for VAE (Reconstruction Loss _ KL Divergence)"""
-    reconstruction_loss = nn.MSELoss(reduction="sum")(reconstructed_x, x)
-    kl_divergence = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())  # KL divergence
-    return reconstruction_loss + kl_divergence
 
+#%%
+# Initialize TensorBoard writer
+timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+log_dir = f"runs/autoencoder_{timestamp}"
+model_dir = "saved_models"
+os.makedirs(model_dir, exist_ok=True)  # Ensure directory exists
+model_path = os.path.join(model_dir, f"autoencoder_{timestamp}.pth")
 
+writer = SummaryWriter(log_dir)
 
-# Load dataset
+#%% Load dataset
 clusters = pd.read_csv("./data/processed/rlps_clusters.csv", index_col=0)
 dataset = pd.read_csv("./data/processed/rlps_filtered.csv", index_col=0)
 
@@ -37,34 +43,71 @@ torch_data = TorchDataset(dataset_array)
 dataloader = DataLoader(torch_data, batch_size=30, shuffle=True)
 
 
+#%%
+# Define Autoencoder
+class Autoencoder(nn.Module):
+    def __init__(self, input_dim, latent_dim):
+        super(Autoencoder, self).__init__()
+        self.encoder = nn.Sequential(
+            nn.Linear(input_dim, 256),
+            nn.ReLU(),
+            nn.Linear(256, 64),
+            nn.ReLU(),
+            nn.Linear(64, latent_dim)
+        )
+        self.decoder = nn.Sequential(
+            nn.Linear(latent_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, 256),
+            nn.ReLU(),
+            nn.Linear(256, input_dim)  # No activation
+        )
+
+    def forward(self, x):
+        encoded = self.encoder(x)
+        decoded = self.decoder(encoded)
+        return encoded, decoded
+
 # Initialize model, loss function, and optimizer
-input_dim = 96  # Load profiles at 15 min resolution
-latent_dim = 3  # Force a 3D latent space
-model = VAE(input_dim, latent_dim)
+input_dim = 96  # MNIST images are 28x28
+latent_dim = 3  # We want a 3D representation
+model = Autoencoder(input_dim, latent_dim)
+criterion = nn.MSELoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 
-
-# Train the VAE
-epochs = 1000
+torch.manual_seed(42)
+# Training loop with TensorBoard logging
+epochs = 1_000
 for epoch in range(epochs):
-    total_loss = 0
+    epoch_loss = 0
     for images in dataloader:
         optimizer.zero_grad()
-        reconstructed_x, mu, logvar, _ = model(images)
-        loss = vae_loss(reconstructed_x, images, mu, logvar)
+        encoded, decoded = model(images)
+        loss = criterion(decoded, images)
         loss.backward()
         optimizer.step()
-        total_loss += loss.item()
+        epoch_loss += loss.item()
 
-    print(f"Epoch {epoch + 1}/{epochs}, Loss: {total_loss:.4f}")
+    avg_loss = epoch_loss / len(dataloader)
+    print(f"Epoch {epoch+1}/{epochs}, Loss: {avg_loss:.4f}")
+
+    # Log the loss to TensorBoard
+    writer.add_scalar("Training Loss", avg_loss, epoch)
+
+torch.save(model.state_dict(), model_path)
+print(f"Model saved to {model_path}")
+
+# Close the TensorBoard writer
+
 
 
 #%%
-# Pull all data and do the 3D latent representation for visualization
+# Get the 3D latent representation for visualization
 torch.manual_seed(42)
 data_samples = next(iter(DataLoader(torch_data, batch_size=len(torch_data), shuffle=False)))
+# data_samples, labels = next(iter(dataloader))  # Get a batch
 with torch.no_grad():
-    decoded, _, _, latent_vectors = model(data_samples)
+   latent_vectors, decoded = model(data_samples)
 
 # Convert to numpy for plotting
 latent_vectors = latent_vectors.numpy()
@@ -82,7 +125,7 @@ ax = fig.add_subplot(111, projection='3d')
 scatter = ax.scatter(latent_vectors_df.iloc[:, 0].values,
                      latent_vectors_df.iloc[:, 1].values,
                      latent_vectors_df.iloc[:, 2].values,
-                     c=latent_vectors_df.iloc[:, -1].values,
+                     c='grey',
                      alpha=0.7,
                      s=2)
 ax.set_title("3D Latent Space of VAE")
@@ -91,15 +134,16 @@ ax.set_ylabel("Z2")
 ax.set_zlabel("Z3")
 ax.set_aspect('equal')
 plt.show()
+
 #%%
-vae_df = pd.DataFrame(latent_vectors, columns=["Z1", "Z2", "Z3"], index= dataset.index)
+autoencoder_df = pd.DataFrame(latent_vectors, columns=["Z1", "Z2", "Z3"], index= dataset.index)
 decoder_df = pd.DataFrame(decoded, index= dataset.index)
 decoder_kw_df = pd.DataFrame(decoded_kw, index= dataset.index)
 data_stamples_df = pd.DataFrame(data_samples.numpy(), index=dataset.index)
 
-
 #%% Save for dash
-vae_df.to_csv("./data/processed/vae_rlps.csv")
+autoencoder_df.to_csv("./data/processed/autoencoder_rlps.csv")
+
 
 #%%
 BOXID='ESD.001120-1'
@@ -113,6 +157,7 @@ ax[1].plot(decoder_kw_df.loc[BOXID].values, linewidth=0.5, color='red', label="D
 ax[1].plot(dataset.loc[BOXID].values, linewidth=0.5, color='black', label="Original [kW]")
 ax[1].legend(loc='upper left', fontsize='small')
 ax[1].set_title(f"Dataset in power [kW] - {BOXID}", fontsize='small')
+
 
 #%%
 print(f"MAPE: {mape(decoder_kw_df.loc[BOXID].values, dataset.loc[BOXID].values):.2f}%")

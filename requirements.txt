@@ -10,3 +10,5 @@ torchvision
 tensorboard
 umap-learn[plot]
 tqdm
+dash
+python-dotenv

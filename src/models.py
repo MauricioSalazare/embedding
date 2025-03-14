@@ -1,5 +1,7 @@
+import numpy as np
 import torch
 from torch import nn as nn
+from torch.utils.data import Dataset
 
 
 class VAE(nn.Module):
@@ -23,8 +25,7 @@ class VAE(nn.Module):
             nn.ReLU(),
             nn.Linear(64, 256),
             nn.ReLU(),
-            nn.Linear(256, input_dim),
-            nn.Sigmoid()  # Outputs should be between 0-1
+            nn.Linear(256, input_dim),  # No activation
         )
 
     def reparameterize(self, mu, logvar):
@@ -41,3 +42,43 @@ class VAE(nn.Module):
 
         decoded = self.decoder(z)
         return decoded, mu, logvar, z
+
+
+class TorchDataset(Dataset):
+    def __init__(self, data: np.ndarray, labels=None):
+        self.data = torch.tensor(data, dtype=torch.float32)
+        self.labels = labels if labels is not None else None
+
+    def __len__(self):
+        return self.data.shape[0]
+
+    def __getitem__(self, idx):
+        if self.labels is None:
+            return self.data[idx]
+
+        else:
+            return self.data[idx], self.labels[idx]
+
+
+class Autoencoder(nn.Module):
+    def __init__(self, input_dim, latent_dim):
+        super(Autoencoder, self).__init__()
+        self.encoder = nn.Sequential(
+            nn.Linear(input_dim, 256),
+            nn.ReLU(),
+            nn.Linear(256, 64),
+            nn.ReLU(),
+            nn.Linear(64, latent_dim)
+        )
+        self.decoder = nn.Sequential(
+            nn.Linear(latent_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, 256),
+            nn.ReLU(),
+            nn.Linear(256, input_dim)  # No activation
+        )
+
+    def forward(self, x):
+        encoded = self.encoder(x)
+        decoded = self.decoder(encoded)
+        return encoded, decoded

@@ -56,7 +56,7 @@ optimizer = optim.Adam(model.parameters(), lr=0.001)
 
 
 # Train the VAE
-epochs = 50
+epochs = 1
 for epoch in range(epochs):
     total_loss = 0
     for images, _ in dataloader:
@@ -71,29 +71,29 @@ for epoch in range(epochs):
 
 
 #%%
-# # Get the 3D latent representation for visualization
-# torch.manual_seed(42)
-#
-# test_data = datasets.MNIST(root='./data', train=False, download=True, transform=transform)
-# new_dataloader = DataLoader(test_data, batch_size=3000, shuffle=False)  # ✅ No shuffling
-#
-#
-# data_samples, labels = next(iter(new_dataloader))
-# # data_samples, labels = next(iter(dataloader))  # Get a batch
-# with torch.no_grad():
-#     _, _, _, latent_vectors = model(data_samples)
-#
-# # Convert to numpy for plotting
-# latent_vectors = latent_vectors.numpy()
-# labels = labels.numpy()
-#
-# # Plot the 3D latent space
-# fig = plt.figure(figsize=(8, 6))
-# ax = fig.add_subplot(111, projection='3d')
-# scatter = ax.scatter(latent_vectors[:, 0], latent_vectors[:, 1], latent_vectors[:, 2], c=labels, cmap='tab10', alpha=0.7, s=2)
-# ax.set_title("3D Latent Space of VAE")
-# ax.set_xlabel("Z1")
-# ax.set_ylabel("Z2")
-# ax.set_zlabel("Z3")
-# plt.colorbar(scatter, label="Digit Label")
-# plt.show()
+# Get the 3D latent representation for visualization
+torch.manual_seed(42)
+
+test_data = datasets.MNIST(root='./data', train=False, download=True, transform=transform)
+new_dataloader = DataLoader(test_data, batch_size=3000, shuffle=False)  # ✅ No shuffling
+
+
+data_samples, labels = next(iter(new_dataloader))
+# data_samples, labels = next(iter(dataloader))  # Get a batch
+with torch.no_grad():
+    _, _, _, latent_vectors = model(data_samples)
+
+# Convert to numpy for plotting
+latent_vectors = latent_vectors.numpy()
+labels = labels.numpy()
+
+# Plot the 3D latent space
+fig = plt.figure(figsize=(8, 6))
+ax = fig.add_subplot(111, projection='3d')
+scatter = ax.scatter(latent_vectors[:, 0], latent_vectors[:, 1], latent_vectors[:, 2], c=labels, cmap='tab10', alpha=0.7, s=2)
+ax.set_title("3D Latent Space of VAE")
+ax.set_xlabel("Z1")
+ax.set_ylabel("Z2")
+ax.set_zlabel("Z3")
+plt.colorbar(scatter, label="Digit Label")
+plt.show()
