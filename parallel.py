@@ -21,7 +21,7 @@ def train_transform(cls: Type,
                     data_parameters:dict,
                     processing_parameters: dict,
                     model_parameters:dict,
-                   ) -> Tuple[pd.DataFrame, Optional[pd.DataFrame]]:
+                   ) -> Tuple[pd.DataFrame, Optional[pd.DataFrame], Optional[dict]]:
 
     process_seed = os.getpid() % 2 ** 32  # Ensure seed is within valid range
     torch.manual_seed(process_seed)  # Set a unique seed per process
@@ -58,13 +58,32 @@ def train_transform(cls: Type,
     # Train and transform
     try:
         model = cls(**model_parameters)
+
+        star_time = time.perf_counter()
         latent_vectors = model.fit_transform(dataset_std)
+        end_time = time.perf_counter()
+        fit_time = end_time - star_time
+
+        timing_info = {
+            'GEMEENTE': gemeente,
+            'MONTH': month,
+            'MODEL': cls.name,
+            'FIT_TIME_SECONDS': fit_time
+        }
+
     except Exception as e:
         print(f"Something went wrong! Exception: {e}")
         print(f"Model: {cls}")
         print(f"Gemeente: {gemeente}")
         print(f"Month: {month}")
         latent_vectors = np.full_like(dataset_std[:, :3], None, dtype=object)
+
+        timing_info = {
+            'GEMEENTE': gemeente,
+            'MONTH': month,
+            'MODEL': cls.name,
+            'FIT_TIME_SECONDS': None
+        }
 
     # Prepare results
     results_parameters = dict(data_clusters=data_clusters,
@@ -91,11 +110,11 @@ def train_transform(cls: Type,
                                              **results_parameters)
         decoded_vectors = pd.concat([decoded_vectors, decoded_vectors_kw], axis=0, ignore_index=True)
 
-        return latent_vectors, decoded_vectors
+        return latent_vectors, decoded_vectors, timing_info
 
     else:
         print("Warning: The model does not have a 'reconstruct' method.")
-        return latent_vectors, None
+        return latent_vectors, None, timing_info
 
 
 
@@ -126,7 +145,7 @@ if __name__ == '__main__':
 
 
     #%% Same but automatic:
-    _ = FileDataset(n_clusters=4, force_clustering=True, write_file=True)  # Force clustering once
+    # _ = FileDataset(n_clusters=4, force_clustering=True, write_file=True)  # Force clustering once
 
     data_provider = FileDataset()
     gemeentes = data_provider.get_gemeente_list()
@@ -158,11 +177,12 @@ if __name__ == '__main__':
              model_parameters=dict())
         for month in range(1, 13)
         for gemeente in gemeentes
-        for cls_model in [AutoencoderModel]
+        for cls_model in [AutoencoderModel, VariationalAutoencoder]
     ]
 
     # tasks = tasks_fast + tasks_nn
-    tasks = tasks_sphere + tasks_fast
+    # tasks = tasks_sphere + tasks_fast
+    tasks = tasks_sphere + tasks_fast + tasks_nn
 
     with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
         # Use partial to adapt function to starmap
@@ -173,6 +193,12 @@ if __name__ == '__main__':
                                        t["model_parameters"]) for t in tasks])
 
     latent_vectors = [result[0] for result in results ]
-    latent_vectors = pd.concat(latent_vectors, ignore_index=True)
+    timing_data = [result[2] for result in results if result[2] is not None]
 
+
+    latent_vectors = pd.concat(latent_vectors, ignore_index=True)
     latent_vectors.to_csv('./data/processed/latent_vectors.csv', index=False)
+
+    # Save timing info
+    timing_df = pd.DataFrame(timing_data)
+    timing_df.to_csv('./data/processed/fit_times.csv', index=False)
