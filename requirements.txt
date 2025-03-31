@@ -12,3 +12,5 @@ umap-learn[plot]
 tqdm
 dash
 python-dotenv
+black
+dash-bootstrap-components

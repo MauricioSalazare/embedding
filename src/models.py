@@ -41,7 +41,15 @@ class VAE(nn.Module):
         z = self.reparameterize(mu, logvar)  # Sampled latent vector
 
         decoded = self.decoder(z)
+
         return decoded, mu, logvar, z
+
+def vae_loss(reconstructed_x, x, mu, logvar):
+    """Loss function for VAE (Reconstruction Loss _ KL Divergence)"""
+    reconstruction_loss = nn.MSELoss(reduction="sum")(reconstructed_x, x)
+    kl_divergence = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())  # KL divergence
+    return reconstruction_loss + kl_divergence
+
 
 
 class TorchDataset(Dataset):

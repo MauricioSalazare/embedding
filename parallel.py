@@ -3,17 +3,19 @@ from matplotlib import pyplot as plt
 matplotlib.use("MacOSX")
 
 import torch
-from torch.utils.tensorboard import SummaryWriter
-import datetime
 import os
+import multiprocessing
 
 from typing import Type, Tuple, Optional
 from src.utils import StandardizationPipeline
-from meta_models import AutoencoderModel, IsomapModel, SphereModel, UmapModel, VariationalAutoencoder
+from meta_models import AutoencoderModel, IsomapModel, SphereModel, UmapModel, VariationalAutoencoder, TSNEModel
 import pandas as pd
+from functools import partial
 
 from database import FileDataset
 import numpy as np
+
+import time
 
 def train_transform(cls: Type,
                     data_parameters:dict,
@@ -30,12 +32,13 @@ def train_transform(cls: Type,
     # Get data
     n_clusters = data_parameters.get("n_clusters", 4)
     force_clustering = data_parameters.get("force_clustering", False)
-    write_file = data_parameters.get("write_file", True)
-    month = data_parameters.get('month', 8)
-    city = data_parameters.get('city', 'ENSCHEDE')
+    write_file = data_parameters.get("write_file", False)
+
+    month = data_parameters['month']
+    gemeente = data_parameters['gemeente']
 
     data_provider = FileDataset(n_clusters=n_clusters, force_clustering=force_clustering, write_file=write_file)
-    data = data_provider.get_dataset(month=month, gemeente=city)
+    data = data_provider.get_dataset(month=month, gemeente=gemeente)
     required_columns = {'GEMEENTE', 'BOXID', 'CLUSTER', 'MONTH'}
     if not required_columns.issubset(data.columns):
         raise ValueError(f"Required columns {required_columns - set(data.columns)} not found in dataset")
@@ -57,20 +60,22 @@ def train_transform(cls: Type,
         model = cls(**model_parameters)
         latent_vectors = model.fit_transform(dataset_std)
     except Exception as e:
-        print(f"Exception: {e}")
+        print(f"Something went wrong! Exception: {e}")
+        print(f"Model: {cls}")
+        print(f"Gemeente: {gemeente}")
+        print(f"Month: {month}")
         latent_vectors = np.full_like(dataset_std[:, :3], None, dtype=object)
 
     # Prepare results
     results_parameters = dict(data_clusters=data_clusters,
-                              gemeente=city,
+                              gemeente=gemeente,
                               month=month,
                               model=cls.name)
-
 
     latent_vectors = prepare_results(latent_vectors=latent_vectors,
                                      units='LD',
                                      column_names=['Z1', 'Z2', 'Z3'],
-                                      **results_parameters)
+                                     **results_parameters)
 
     if hasattr(model, "reconstruct") and callable(getattr(model, "reconstruct")):
         decoded = model.reconstruct(dataset_std)
@@ -91,7 +96,6 @@ def train_transform(cls: Type,
     else:
         print("Warning: The model does not have a 'reconstruct' method.")
         return latent_vectors, None
-
 
 
 
@@ -118,45 +122,57 @@ def prepare_results(latent_vectors: np.array,
 
     return latent_vectors_df
 
+if __name__ == '__main__':
 
 
-#%% Same but automatic:
-data_parameters = dict(month=7,
-                       city='ENSCHEDE',
-                       n_clusters=4,
-                       force_clustering=False,
-                       write_file=False)
-model_parameters = dict()
-processing_parameters = dict(order='row')
+    #%% Same but automatic:
+    _ = FileDataset(n_clusters=4, force_clustering=True, write_file=True)  # Force clustering once
 
-model_class = SphereModel
-latent, decoded = train_transform(cls=model_class,
-                                  data_parameters=data_parameters,
-                                  processing_parameters=processing_parameters,
-                                  model_parameters=model_parameters,
-                                  )
+    data_provider = FileDataset()
+    gemeentes = data_provider.get_gemeente_list()
 
+    tasks_sphere = [
+        dict(cls=cls_model,
+             data_parameters=dict(month=month, gemeente=gemeente),
+             processing_parameters=dict(order='row'),
+             model_parameters=dict())  # Leave default
+        for month in range(1, 13)
+        for gemeente in gemeentes
+        for cls_model in [SphereModel, IsomapModel]
+    ]
 
-#% Plot the 3D latent space
-fig = plt.figure(figsize=(8, 6))
-ax = fig.add_subplot(111, projection='3d')
-colors = ['C0', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7']
-for cluster, color in zip(sorted(latent['CLUSTER'].unique().tolist()), colors):
-    idx = latent['CLUSTER'] == cluster
-    scatter = ax.scatter(latent[idx]['Z1'].values,
-                         latent[idx]['Z2'].values,
-                         latent[idx]['Z3'].values,
-                         c=color,
-                         alpha=0.7,
-                         s=2,
-                         label=f"Cluster {cluster} -> {sum(idx)}")
-ax.set_title(f"3D Latent Space for {model_class.name.upper()} "
-             f"- Month: {data_parameters['month']} "
-             f"- City: {data_parameters['city']}")
-ax.legend(loc="upper left")
-ax.set_xlabel("Z1")
-ax.set_ylabel("Z2")
-ax.set_zlabel("Z3")
-ax.set_aspect('equal')
-plt.show()
+    tasks_fast = [
+        dict(cls=cls_model,
+             data_parameters=dict(month=month, gemeente=gemeente),
+             processing_parameters=dict(order='row-column'),
+             model_parameters=dict())  # Leave default
+        for month in range(1, 13)
+        for gemeente in gemeentes
+        for cls_model in [UmapModel, TSNEModel]
+    ]
 
+    tasks_nn = [
+        dict(cls=cls_model,
+             data_parameters=dict(month=month, gemeente=gemeente),
+             processing_parameters=dict(order='row-column'),
+             model_parameters=dict())
+        for month in range(1, 13)
+        for gemeente in gemeentes
+        for cls_model in [AutoencoderModel]
+    ]
+
+    # tasks = tasks_fast + tasks_nn
+    tasks = tasks_sphere + tasks_fast
+
+    with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
+        # Use partial to adapt function to starmap
+        func = partial(train_transform)
+        results = pool.starmap(func, [(t["cls"],
+                                       t["data_parameters"],
+                                       t["processing_parameters"],
+                                       t["model_parameters"]) for t in tasks])
+
+    latent_vectors = [result[0] for result in results ]
+    latent_vectors = pd.concat(latent_vectors, ignore_index=True)
+
+    latent_vectors.to_csv('./data/processed/latent_vectors.csv', index=False)
